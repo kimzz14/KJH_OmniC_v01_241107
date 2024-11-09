@@ -1,5 +1,5 @@
 prefix=$1
-threadN=23
+threadN=$2
 
 sh pipe/bwa-mem.sh ${prefix}_1 ${threadN}
 sh pipe/bwa-mem.sh ${prefix}_2 ${threadN}
