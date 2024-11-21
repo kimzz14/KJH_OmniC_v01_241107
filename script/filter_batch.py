@@ -193,7 +193,7 @@ outSAM = opt.outSAM
 tmpPrefix = './tmp/tmp.filter.' + datetime.now().strftime("%Y%m%d%H%M%S")
 
 
-run_batch(24, inSAM, tmpPrefix)
+run_batch(threadN, inSAM, tmpPrefix)
 
 samtools = SAMTOOLS()
 samtools.merge(outSAM, tmpPrefix)
