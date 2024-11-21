@@ -8,18 +8,17 @@ class SamLine:
         self.data_LIST = self.line.split('\t')
 
         self.QNAME = self.data_LIST[ 0]
-        self.FLAG  = self.data_LIST[ 1]
+        self.FLAG  = int(self.data_LIST[ 1])
         self.RNAME = self.data_LIST[ 2]
-        self.POS   = self.data_LIST[ 3]
+        self.POS   = int(self.data_LIST[ 3])
         self.MAPQ  = self.data_LIST[ 4]
         self.CIGAR = self.data_LIST[ 5]
         self.RNEXT = self.data_LIST[ 6]
-        self.PNEXT = self.data_LIST[ 7]
+        self.PNEXT = int(self.data_LIST[ 7])
         self.TLEN  = self.data_LIST[ 8]
         self.SEQ   = self.data_LIST[ 9]
         self.QUAL  = self.data_LIST[10]
 
-        self.FLAG  = int(self.FLAG)
         #Define strand
         if self.FLAG & 16 == 0:
             self.strand = '+'
@@ -49,6 +48,12 @@ class SamLine:
         else:
             self.sorted_CIGAR_LIST = self.CIGAR_LIST[::-1]
 
+    def isFirst(self):
+        if self.FLAG&64 == 64:
+            return True
+        else:
+            return False
+
     def isUsable(self):
         if self.CIGAR == '*': return False
         if len(self.CIGAR_LIST) > 2: return False
@@ -59,30 +64,30 @@ class SamLine:
     def toPrint(self):
         print('  '.join(map(str, ['   ', self.score, self.strand, self.sorted_CIGAR_LIST, self.line])))
     
-    def toString(self, isFirst):
-        if isFirst == True:
-            self.data_LIST[ 1] = self.FLAG | 64
-        else:
-            self.data_LIST[ 1] = self.FLAG | 128
+    def toString(self):
+        context = [self.QNAME, self.FLAG, self.RNAME, self.POS, self.MAPQ, self.CIGAR, self.RNEXT, self.PNEXT, self.TLEN, self.SEQ, self.QUAL] + self.data_LIST[11:]
 
-        return '\t'.join(map(str, self.data_LIST))
+        return '\t'.join(map(str, context))
 
-def filter(line_LIST):
+def filter(line_LIST, isFirst):
+    
     samLine_LIST = []
     for line in line_LIST:
         samLine = SamLine(line)
 
-        if samLine.isUsable() == False:
+        if samLine.isFirst() != isFirst:
             continue
 
+        if samLine.isUsable() == False:
+            continue
+        
         samLine_LIST += [samLine]
 
         if len(samLine_LIST) == 1:
-            if samLine.score < samLine.sorted_CIGAR_LIST[0][0] - 5:
+            if samLine.score < samLine.sorted_CIGAR_LIST[0][0] - 10:
                 return None
         elif len(samLine_LIST) == 2:
             break
-
     if len(samLine_LIST) == 0:
         return None
     elif len(samLine_LIST) == 1:
@@ -92,6 +97,27 @@ def filter(line_LIST):
             return samLine_LIST[0]
         else:
             return None
+
+def correction(samLine1, samLine2):
+    samLine1.PNEXT = samLine2.POS
+    samLine2.PNEXT = samLine1.POS
+
+    if samLine1.RNAME == samLine2.RNAME:
+        samLine1.RNEXT = '='
+        samLine2.RNEXT = '='
+
+        if samLine1.POS < samLine2.POS:
+            samLine1.TLEN = samLine2.POS - samLine1.POS + 150
+            samLine2.TLEN = - samLine1.TLEN
+        else:
+            samLine1.TLEN = samLine2.POS - samLine1.POS - 150
+            samLine2.TLEN = - samLine1.TLEN
+    else:
+        samLine1.RNEXT = samLine2.RNAME
+        samLine2.RNEXT = samLine1.RNAME
+
+        samLine1.TLEN = 0
+        samLine2.TLEN = 0
 
 import subprocess
 class SAMTOOLS:
@@ -110,10 +136,9 @@ class SAMTOOLS:
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         process.wait()
     
-
 from datetime import datetime
 
-def run_batch(batchN, inSAM, prefix, isFirst):
+def run_batch(batchN, inSAM, prefix):
     def run_single(batchIDX):
         fin = gzip.open(inSAM, 'rt')
         fout = gzip.open(prefix + '.' + str(batchIDX).zfill(6) + '.sam.gz', 'wt')
@@ -126,42 +151,49 @@ def run_batch(batchN, inSAM, prefix, isFirst):
         for readID, line_LIST in groupby(fin, lambda line: line.rstrip('\n').split('\t')[0]):
             readIDX += 1
             if readIDX%batchN != batchIDX: continue
+            line_LIST = list(line_LIST)
+            samLine1 = filter(line_LIST, isFirst=True)
+            samLine2 = filter(line_LIST, isFirst=False)
 
-            samLine = filter(line_LIST)
-            if samLine == None: continue
-            fout.write(samLine.toString(isFirst=isFirst) + '\n')
+            if samLine1 == None:
+                pass
+            elif samLine2 == None:
+                pass
+            else:
+                correction(samLine1, samLine2)
+                fout.write(samLine1.toString() + '\n')
+                fout.write(samLine2.toString() + '\n')
+
         fout.close()
         fin.close()
     
     Parallel(n_jobs=batchN)(delayed(run_single)(batchIDX) for batchIDX in range(0, batchN))
 
+
 from optparse import OptionParser
 import sys
 #option parser
 parser = OptionParser(usage="""Run annotation.py \n Usage: %prog [options]""")
-parser.add_option("-t","--threadN",action = 'store',type = 'int',dest = 'threadN',help = "")
-parser.add_option("-1","--in1",action = 'store',type = 'string',dest = 'inSAM1',help = "")
-parser.add_option("-2","--in2",action = 'store',type = 'string',dest = 'inSAM2',help = "")
-parser.add_option("-o","--out",action = 'store',type = 'string',dest = 'outSAM',help = "")
+parser.add_option("-t","--threadN",action = 'store',type = 'int'   ,dest = 'threadN',help = "")
+parser.add_option("-i","--in"     ,action = 'store',type = 'string',dest = 'inSAM'  ,help = "")
+parser.add_option("-o","--out"    ,action = 'store',type = 'string',dest = 'outSAM' ,help = "")
 
 (opt, args) = parser.parse_args()
-if opt.threadN == None or opt.inSAM1 == None or opt.inSAM2 == None or opt.outSAM == None:
+if opt.threadN == None or opt.inSAM == None or opt.outSAM == None:
     print('Basic usage')
     print('')
-    print('     python filter_sam.py -t 24 -1 test_1.sam.gz -2 test_2.sam.gz -o test.uniq.bam')
+    print('     python filter_batch.py -t 24 -i test.sam.gz -o test.uniq.bam')
     print('')
     sys.exit()
 
 threadN = opt.threadN
-inSAM1 = opt.inSAM1
-inSAM2 = opt.inSAM2
+inSAM = opt.inSAM
 outSAM = opt.outSAM
 
 tmpPrefix = './tmp/tmp.filter.' + datetime.now().strftime("%Y%m%d%H%M%S")
 
 
-run_batch(24, inSAM1, tmpPrefix + '_1', isFirst = True)
-run_batch(24, inSAM2, tmpPrefix + '_2', isFirst = False)
+run_batch(24, inSAM, tmpPrefix)
 
 samtools = SAMTOOLS()
 samtools.merge(outSAM, tmpPrefix)
