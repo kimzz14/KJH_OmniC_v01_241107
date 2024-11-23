@@ -131,7 +131,7 @@ class SAMTOOLS:
         command_LIST += ['-o']
 
 
-        command = 'samtools merge -o {0} {1}*.sam.gz'.format(outfile, prefix)
+        command = 'samtools merge -o {0} {1}*.sam'.format(outfile, prefix)
         #print(command)
         process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
         process.wait()
@@ -141,7 +141,7 @@ from datetime import datetime
 def run_batch(batchN, inSAM, prefix):
     def run_single(batchIDX):
         fin = gzip.open(inSAM, 'rt')
-        fout = gzip.open(prefix + '.' + str(batchIDX).zfill(6) + '.sam.gz', 'wt')
+        fout = open(prefix + '.' + str(batchIDX).zfill(6) + '.sam', 'w')
         for line in fin:
             fout.write(line)
             if line.startswith('@PG') == True:
